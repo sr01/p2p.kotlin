@@ -12,11 +12,9 @@ class TcpPeerConnectionFactory<TMessage>(private val protocol: MessageProtocol<T
         when (data) {
             is Socket -> {
                 val remoteAddress = data.remoteSocketAddress as InetSocketAddress
-                val host = remoteAddress.hostName
-                val port = remoteAddress.port
-                val id = String.format("%s:%d", host, port)
+                val host = remoteAddress.address.hostAddress
 
-                TcpPeerConnection(id, data, this.protocol, logger)
+                TcpPeerConnection(host, data, this.protocol, logger)
             }
             is ConnectionInfo -> TcpPeerConnection(data.id, data.host, data.port, protocol, logger)
             else -> throw RuntimeException("can't create connection by the provided argument: $data")

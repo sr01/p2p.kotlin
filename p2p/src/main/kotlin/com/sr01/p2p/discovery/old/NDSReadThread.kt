@@ -1,5 +1,6 @@
-package com.sr01.p2p.discovery
+package com.sr01.p2p.discovery.old
 
+import com.sr01.p2p.discovery.NDSParser
 import com.sr01.p2p.identity.Identity
 import com.sr01.p2p.identity.IdentityDeserializer
 import com.sr01.p2p.identity.IdentityProvider
@@ -20,7 +21,7 @@ abstract class NDSReadThread<T : Identity>(var identityProvider: IdentityProvide
             val receivePacket = DatagramPacket(receiveBuffer, receiveBuffer.size)
             socket.receive(receivePacket)
             val message = String(receivePacket.data, 0, receivePacket.length, Charset.forName("utf-8"))
-            logger.v(tag, "received: \r\n\tdata: $message\r\n\tfrom address: ${receivePacket.address.hostAddress}")
+            logger.d(tag, "received: \r\n\tdata: $message\r\n\tfrom address: ${receivePacket.address.hostAddress}")
 
             val discoveryRequest = com.sr01.p2p.discovery.NDSParser.parseDiscoveryRequest(message)
             if (discoveryRequest != null) {

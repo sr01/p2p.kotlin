@@ -11,10 +11,7 @@ import com.sr01.p2p.utils.IPAddressProvider
 import com.sr01.p2p.utils.Logger
 import com.sr01.p2p.utils.broadcastTo
 import com.sr01.p2p.utils.send
-import java.net.DatagramPacket
-import java.net.DatagramSocket
-import java.net.InetAddress
-import java.net.SocketTimeoutException
+import java.net.*
 import java.nio.charset.Charset
 
 @Suppress("unused")
@@ -26,19 +23,24 @@ class UDPNetworkDiscoveryService<T : Identity>(identityProvider: IdentityProvide
                                                private val port: Int = 8888) : NetworkDiscoveryServiceBase<T, com.sr01.p2p.discovery.DiscoveryMessage>(identityProvider, deserializer, serializer, logger) {
 
     private var socket: DatagramSocket? = null
+    private var isShutdown = false
 
     override fun readMessageFromTransport(): com.sr01.p2p.discovery.DiscoveryMessage? {
         socket?.let { socket ->
             try {
-                logger.v(TAG, "readMessageFromTransport, socket: $socket")
+                logger.d(TAG, "readMessageFromTransport, socket: $socket")
                 val receiveBuffer = ByteArray(15000)
                 val receivePacket = DatagramPacket(receiveBuffer, receiveBuffer.size)
                 socket.receive(receivePacket)
                 val message = String(receivePacket.data, 0, receivePacket.length, Charset.forName("utf-8"))
-                logger.v(TAG, "received: \r\n\tdata: $message\r\n\tfrom address: ${receivePacket.address.hostAddress}")
+                logger.d(TAG, "received: \r\n\tdata: $message\r\n\tfrom address: ${receivePacket.address.hostAddress}")
                 return com.sr01.p2p.discovery.DiscoveryMessage(message, receivePacket.address, receivePacket.port)
 
             } catch (ignored: SocketTimeoutException) {
+            }catch (sx: SocketException) {
+                if(!isShutdown){
+                    sx.printStackTrace()
+                }
             }
         }
         return null
@@ -46,6 +48,7 @@ class UDPNetworkDiscoveryService<T : Identity>(identityProvider: IdentityProvide
 
     @Synchronized
     override fun startTransport() {
+        isShutdown = false
         socket = DatagramSocket(port, InetAddress.getByName("0.0.0.0")).apply {
             broadcast = true
             soTimeout = 10000
@@ -55,6 +58,7 @@ class UDPNetworkDiscoveryService<T : Identity>(identityProvider: IdentityProvide
     @Synchronized
     override fun stopTransport() {
         try {
+            isShutdown = true
             socket?.close()
             socket = null
         } catch (ignored: Exception) {
@@ -73,8 +77,12 @@ class UDPNetworkDiscoveryService<T : Identity>(identityProvider: IdentityProvide
     override fun broadcastMessage(message: String) {
         socket?.let { socket ->
             if (!socket.isClosed) {
-                val data = message.toByteArray(charset("utf-8"))
-                socket.broadcastTo(data, ipAddressProvider.ipAddress, port)
+                val addresses = ipAddressProvider.getAllIPAddresses()
+                addresses.forEach { address ->
+                    logger.d(TAG, "send broadcast message to $address on port $port")
+                    val data = message.toByteArray(charset("utf-8"))
+                    socket.broadcastTo(data, address, port)
+                }
             }
         }
     }
