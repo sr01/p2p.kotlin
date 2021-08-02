@@ -4,8 +4,29 @@ plugins {
     id 'maven-publish'
 }
 
-group='com.github.sr01'
-version='1.0.3.0'
+publishing {
+    publications {
+        mavenJava(MavenPublication) {
+
+            groupId = 'com.github.sr01'
+            artifactId = 'p2p.kotlin'
+            version = '1.0.3.0'
+
+            from components.java
+
+            pom{
+                name = "p2p.kotlin"
+                description = "Peer-to-peer library written in Kotlin"
+                developers {
+                    developer {
+                        id = 'sr01'
+                        name = 'Shmulik Rosi'
+                    }
+                }
+            }
+        }
+    }
+}
 
 sourceSets {
     main {
