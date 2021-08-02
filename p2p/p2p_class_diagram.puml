@@ -1,0 +1,48 @@
+@startuml
+
+    interface ConnectionListener<TMessage>{
+        +onConnected(connection: PeerConnection<TMessage>)
+        +onDisconnected(connection: PeerConnection<TMessage>)
+        +onFailedToConnect(connection: PeerConnection<TMessage>)
+    }
+    interface DataReceivedListener<TMessage>
+    interface PeerConnection<TMessage>
+    interface Peer<TMessage>
+    interface PeerConnectionFactory<TMessage>
+    interface PeerListener<TMessage>
+    interface PeerReader<out TMessage>
+    interface PeerWriter<in TMessage>
+    class ReadRunnable<TMessage>
+    interface ReadThreadListener<in TMessage>
+
+    ConnectionListener -- PeerConnection
+    DataReceivedListener --> PeerConnection
+    PeerConnectionFactory --> PeerConnection
+    PeerListener --> PeerConnection
+    ReadRunnable o-- ReadThreadListener
+    ReadRunnable o-- PeerReader
+    ReadRunnable o-- InputStream
+
+    class TcpPeer<TMessage>
+    class TcpPeerServer<TMessage>
+    class TcpPeerConnection<TMessage>
+
+    Peer <|-- TcpPeer
+    TcpPeer o-- PeerConnectionFactory
+    TcpPeer o-- TcpPeerServer
+    TcpPeer o-- PeerListener
+    TcpPeer -- PeerConnection
+    TcpPeer -- ConnectionListener
+    TcpPeer -- DataReceivedListener
+
+    PeerConnection <|-- TcpPeerConnection
+    TcpPeerConnection o-- PeerWriter
+    TcpPeerConnection o-- PeerReader
+    TcpPeerConnection --> DataReceivedListener
+    TcpPeerServer o-- PeerConnectionFactory
+    TcpPeerConnection --> ReadRunnable
+    TcpPeerConnection o-- Socket
+    TcpPeerConnection o-- OutputStream
+    Socket o-- OutputStream
+    Socket o-- InputStream
+@enduml

@@ -1,0 +1,35 @@
+plugins {
+    id 'java-library'
+    id 'org.jetbrains.kotlin.jvm'
+    id 'maven-publish'
+}
+
+group='com.github.sr01'
+version='1.0.3.0'
+
+sourceSets {
+    main {
+        kotlin {
+            srcDirs = ["src/main/kotlin"]
+        }
+    }
+    test {
+        kotlin {
+            srcDirs = ["src/test/kotlin"]
+        }
+    }
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13'
+    testImplementation 'org.jetbrains.kotlin:kotlin-test'
+}
+
+task copyKotlinReleaseUnitTestClasses(type: Copy) {
+    from "build/tmp/kotlin-classes/releaseUnitTest"
+    into "build/intermediates/classes/test/release"
+}
+
+afterEvaluate {
+    test.dependsOn copyKotlinReleaseUnitTestClasses
+}
