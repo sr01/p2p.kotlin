@@ -24,7 +24,8 @@ class TcpPeerConnection<TMessage>(override val id: String, private val host: Str
     private var socket: Socket? = null
     private var outputStream: DataOutputStream? = null
     private val listenersObservable = PeerConnectionObservable()
-    private var onMessage: (connection: PeerConnection<TMessage>, message: TMessage) -> Unit = { _, _ -> }
+    private val incomingMessagesQueue = LinkedList<TMessage>()
+    private var onMessage: ((PeerConnection<TMessage>, TMessage) -> Unit)? = null
 
     constructor(id: String, socket: Socket, protocol: MessageProtocol<TMessage>, logger: Logger)
             : this(id, socket.remoteSocketAddress.toString(), socket.port, protocol, logger) {
@@ -32,7 +33,7 @@ class TcpPeerConnection<TMessage>(override val id: String, private val host: Str
         executor.execute {
             initSocketAndStartReadThread(socket)
             state = STATE_CONNECTED
-            logger.d(tag, "connected")
+            logger.d(tag, "state change to connected")
             notify(EVENT_CONNECTED)
         }
     }
@@ -41,21 +42,24 @@ class TcpPeerConnection<TMessage>(override val id: String, private val host: Str
         executor.execute {
             if (state == STATE_DISCONNECTED) {
                 state = STATE_CONNECTING
-
+                logger.d(tag, "state change to connecting")
                 internalConnect()
             }
         }
     }
 
     override fun disconnect() {
-        executor.execute {
-            if (state == STATE_CONNECTED) {
-                state = STATE_DISCONNECTING
+        if (state == STATE_CONNECTED || state == STATE_CONNECTING) {
+            executor.execute {
+                if (state == STATE_CONNECTED || state == STATE_CONNECTING) {
+                    state = STATE_DISCONNECTING
 
-                internalDisconnect()
+                    logger.d(tag, "state change to disconnecting")
 
-                logger.d(tag, "disconnected")
-                executor.shutdownNow()
+                    internalDisconnect()
+
+                    executor.shutdownNow()
+                }
             }
         }
     }
@@ -77,6 +81,13 @@ class TcpPeerConnection<TMessage>(override val id: String, private val host: Str
         }
     }
 
+    override fun sendAndDisconnect(message: TMessage) {
+        executor.execute {
+            this.send(message)
+            this.disconnect()
+        }
+    }
+
     override fun toString(): String {
         return "TcpPeerConnection{id='$id}"
     }
@@ -89,6 +100,7 @@ class TcpPeerConnection<TMessage>(override val id: String, private val host: Str
 
     override fun onDisconnected(function: (connection: PeerConnection<TMessage>) -> Unit) {
         executor.execute {
+            logger.d(tag, "onDisconnected, add observer function: $function")
             addObserver(EVENT_DISCONNECTED, function)
         }
     }
@@ -101,6 +113,14 @@ class TcpPeerConnection<TMessage>(override val id: String, private val host: Str
 
     override fun onMessage(function: (connection: PeerConnection<TMessage>, message: TMessage) -> Unit) {
         executor.execute {
+
+            while (!incomingMessagesQueue.isEmpty()) {
+                logger.d(tag, "dequeue message from preProcessedMessagesQueue")
+                val message = incomingMessagesQueue.remove()
+                function(this, message)
+            }
+
+            logger.d(tag, "set onMessage function callback")
             onMessage = function
         }
     }
@@ -117,7 +137,7 @@ class TcpPeerConnection<TMessage>(override val id: String, private val host: Str
         val runnable = ReadRunnable(id, socket.getInputStream(), protocol, logger,
             onDataReceived = { message ->
                 logger.d(tag, "message received: $message")
-                onMessage(this@TcpPeerConnection, message)
+                onIncomingMessage(message)
             },
             onDisconnect = {
                 disconnect()
@@ -130,15 +150,25 @@ class TcpPeerConnection<TMessage>(override val id: String, private val host: Str
         this.readThread = readThread
     }
 
-    private fun internalConnect() {
-        logger.d(tag, "connecting")
+    private fun onIncomingMessage(message: TMessage) {
+        executor.execute {
+            val onMessageFunc = onMessage
+            if (onMessageFunc != null) {
+                onMessageFunc(this, message)
+            } else {
+                logger.d(tag, "onIncomingMessage onMessageFunc is null, queue message")
+                incomingMessagesQueue.add(message)
+            }
+        }
+    }
 
+    private fun internalConnect() {
         try {
             val s = Socket()
             s.connect(InetSocketAddress(host, port), CONNECT_TIMEOUT_MILLISECONDS)
             initSocketAndStartReadThread(s)
             state = STATE_CONNECTED
-            logger.d(tag, "connected")
+            logger.d(tag, "state change to connected")
             notify(EVENT_CONNECTED)
 
         } catch (e: IOException) {
@@ -150,7 +180,6 @@ class TcpPeerConnection<TMessage>(override val id: String, private val host: Str
     }
 
     private fun internalDisconnect() {
-        logger.d(tag, "disconnecting")
         readThread?.interrupt()
 
         notify(EVENT_DISCONNECTED)
@@ -162,6 +191,7 @@ class TcpPeerConnection<TMessage>(override val id: String, private val host: Str
             logger.e(tag, "failed to disconnect", e)
         } finally {
             state = STATE_DISCONNECTED
+            logger.d(tag, "state change to disconnected")
         }
     }
 
@@ -170,13 +200,11 @@ class TcpPeerConnection<TMessage>(override val id: String, private val host: Str
     }
 
     private fun addObserver(event: Int, function: (connection: PeerConnection<TMessage>) -> Unit) {
-        val weekFunRef = WeakReference(function)
-        listenersObservable.addObserver { o, arg ->
-            val params = arg as ConnectionEventParams<TMessage>
+        listenersObservable.addObserver { _, arg ->
+            @Suppress("UNCHECKED_CAST")
+            val params: ConnectionEventParams<TMessage> = arg as ConnectionEventParams<TMessage>
             when (params.event) {
-                event -> weekFunRef.get()?.let {
-                    it(params.connection)
-                }
+                event -> function(params.connection)
             }
         }
     }

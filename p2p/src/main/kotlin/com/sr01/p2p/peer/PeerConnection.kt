@@ -9,6 +9,8 @@ interface PeerConnection<TMessage> {
 
     fun send(message: TMessage)
 
+    fun sendAndDisconnect(message: TMessage)
+
     fun onConnected(function: (connection: PeerConnection<TMessage>) -> Unit)
 
     fun onMessage(function: (connection: PeerConnection<TMessage>, message: TMessage) -> Unit)
