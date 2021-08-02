@@ -33,11 +33,11 @@ class ReadRunnable<TMessage>(
             try {
                 message = MessageWriter.read(dataStream, protocol)
             } catch (ex: EOFException) {
-                logger.v(tag, "EOFException", ex)
+                logger.d(tag, "EOFException", ex)
                 disconnect = true
                 disconnectReason = ex
             } catch (ex: SocketException) {
-                logger.v(tag, "SocketException", ex)
+                logger.d(tag, "SocketException", ex)
                 disconnect = true
                 disconnectReason = ex
             } catch (e: Exception) {
@@ -57,7 +57,7 @@ class ReadRunnable<TMessage>(
             }
 
             if (disconnect) {
-                logger.v(tag, "disconnect detected, reason: $disconnectReason")
+                logger.d(tag, "disconnect detected, reason: $disconnectReason")
                 notifyDisconnect()
             }
         }

@@ -1,6 +1,6 @@
-package com.sr01.p2p.test
+package com.sr01.p2p.utils
 
-object EmptyLogger : com.sr01.p2p.utils.Logger {
+object EmptyLogger : Logger {
     override fun e(tag: String, msg: String, e: Throwable?) {
     }
 
