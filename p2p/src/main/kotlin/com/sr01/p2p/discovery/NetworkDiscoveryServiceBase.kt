@@ -10,6 +10,7 @@ import com.sr01.p2p.utils.get
 import java.util.*
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -18,10 +19,10 @@ import java.util.concurrent.atomic.AtomicBoolean
  * A Facade for NetworkDiscoveryServer and INetworkDiscoveryClient.
  */
 abstract class NetworkDiscoveryServiceBase<T : Identity, M : TransportMessage>(
-        private val identityProvider: IdentityProvider<T>,
-        private val deserializer: IdentityDeserializer<T>,
-        private val serializer: IdentitySerializer<T>,
-        private val logger: Logger) : NetworkDiscoveryService<T> {
+    private val identityProvider: IdentityProvider<T>,
+    private val deserializer: IdentityDeserializer<T>,
+    private val serializer: IdentitySerializer<T>,
+    private val logger: Logger) : NetworkDiscoveryService<T> {
 
     private val isDiscoverableAtomic = AtomicBoolean(false)
     private val isDiscoveringAtomic = AtomicBoolean(false)
@@ -29,8 +30,8 @@ abstract class NetworkDiscoveryServiceBase<T : Identity, M : TransportMessage>(
     private var discoverTimer: Timer? = null
     private var discoveryListener: com.sr01.p2p.discovery.DiscoveryListener<T>? = null
 
-    private var listenerNotifyExecutor: ExecutorService? = null
-    private lateinit var workExecutor: ExecutorService
+    private val listenerNotifyExecutor: ExecutorService = Executors.newSingleThreadExecutor()
+    private val workExecutor = Executors.newSingleThreadScheduledExecutor()
 
     var isDiscoverable: Boolean
         get() = isDiscoverableAtomic.get()
@@ -45,17 +46,13 @@ abstract class NetworkDiscoveryServiceBase<T : Identity, M : TransportMessage>(
         }
 
     override fun setDiscoveryListener(listener: com.sr01.p2p.discovery.DiscoveryListener<T>) {
-        listenerNotifyExecutor.get {
-            execute { discoveryListener = listener }
-        }.orElse {
+        listenerNotifyExecutor.execute {
             discoveryListener = listener
         }
     }
 
     override fun clearDiscoveryListener() {
-        listenerNotifyExecutor.get {
-            execute { discoveryListener = null }
-        }.orElse {
+        listenerNotifyExecutor.execute {
             discoveryListener = null
         }
     }
@@ -67,9 +64,11 @@ abstract class NetworkDiscoveryServiceBase<T : Identity, M : TransportMessage>(
     override fun startDiscoverable() {
         if (isDiscoverable) return
 
-        isDiscoverable = true
-        logger.i(TAG, "discoverable start")
-        startReadThread()
+        workExecutor.execute {
+            isDiscoverable = true
+            logger.i(TAG, "discoverable start")
+            startReadThread()
+        }
     }
 
     /**
@@ -79,10 +78,12 @@ abstract class NetworkDiscoveryServiceBase<T : Identity, M : TransportMessage>(
     override fun stopDiscoverable() {
         if (!isDiscoverable) return
 
-        isDiscoverable = false
-        workExecutor.submit {
-            sendLeaveMessage()
-            stopReadThread()
+        workExecutor.execute {
+            isDiscoverable = false
+            workExecutor.submit {
+                sendLeaveMessage()
+                stopReadThread()
+            }
             logger.i(TAG, "discoverable stop")
         }
     }
@@ -94,18 +95,19 @@ abstract class NetworkDiscoveryServiceBase<T : Identity, M : TransportMessage>(
     override fun startDiscover() {
         if (isDiscovering) return
 
-        isDiscovering = true
-        logger.i(TAG, "discover start")
-        listenerNotifyExecutor = Executors.newSingleThreadExecutor()
-        discoverTimer = Timer()
-        discoverTimer?.schedule(object : TimerTask() {
-            override fun run() {
-                if (isDiscovering) {
-                    sendDiscoveryRequest()
+        workExecutor.submit {
+            isDiscovering = true
+            logger.i(TAG, "discover start")
+            discoverTimer = Timer()
+            discoverTimer?.schedule(object : TimerTask() {
+                override fun run() {
+                    if (isDiscovering) {
+                        sendDiscoveryRequest()
+                    }
                 }
-            }
-        }, 0L, DISCOVER_INTERVAL_MILLISEC)
-        startReadThread()
+            }, 0L, DISCOVER_INTERVAL_MILLISEC)
+            startReadThread()
+        }
     }
 
     /**
@@ -114,31 +116,42 @@ abstract class NetworkDiscoveryServiceBase<T : Identity, M : TransportMessage>(
     @Synchronized
     override fun stopDiscover() {
         if (!isDiscovering) return
+        workExecutor.submit {
+            isDiscovering = false
 
-        isDiscovering = false
+            discoverTimer?.cancel()
 
-        discoverTimer?.cancel()
+            stopReadThread()
 
-        stopReadThread()
-
-        listenerNotifyExecutor?.shutdown()
-        listenerNotifyExecutor = null
-
-        logger.i(TAG, "discover stop")
+            logger.i(TAG, "discover stop")
+        }
     }
 
     @Synchronized
-    private fun startReadThread() {
-        logger.v(TAG, "startReadThread")
+    private fun startReadThread(retryNo: Int = 0) {
+        logger.d(TAG, "startReadThread, retryNo: $retryNo")
 
         if (readThread == null) {
 
-            startTransport()
+            try {
+                startTransport()
 
-            readThread = Thread(this::readLoop0, TAG).apply {
-                start()
+                readThread = Thread(this::readLoop0, TAG).apply {
+                    start()
+                }
+
+                logger.d(TAG, "startReadThread, start successfully")
+
+            } catch (e: Exception) {
+                if (retryNo < MAX_START_READ_THREAD_RETRIES) {
+                    logger.e(TAG, "startReadThread, failed, schedule retry", e)
+                    workExecutor.schedule({
+                        startReadThread(retryNo + 1)
+                    }, START_READ_THREAD_RETRY_INTERVAL_SECONDS, TimeUnit.SECONDS)
+                }else{
+                    logger.e(TAG, "startReadThread, failed, no more retries", e)
+                }
             }
-            workExecutor = Executors.newSingleThreadExecutor()
         }
     }
 
@@ -146,15 +159,12 @@ abstract class NetworkDiscoveryServiceBase<T : Identity, M : TransportMessage>(
     private fun stopReadThread() {
         if (!isDiscovering && !isDiscoverable) {
             readThread?.interrupt()
-            workExecutor.shutdown()
             readThread = null
             stopTransport()
         }
     }
 
     private fun readLoop0() {
-
-        logger.v(TAG, "readLoop0")
 
         try {
             while (!Thread.currentThread().isInterrupted) {
@@ -165,9 +175,7 @@ abstract class NetworkDiscoveryServiceBase<T : Identity, M : TransportMessage>(
             }
 
         } catch (e: Exception) {
-            logger.e(TAG, "readLoop0 Exception: $e", e)
-
-            logger.d(TAG, "Error inside discoverable thread (socket probably closed): $e")
+            logger.d(TAG, "Error inside discoverable read thread (socket probably closed): $e")
         } finally {
             logger.d(TAG, "discoverable read thread ended")
         }
@@ -189,7 +197,7 @@ abstract class NetworkDiscoveryServiceBase<T : Identity, M : TransportMessage>(
 
     private fun onDiscoveryRequest(message: IncomingNDSMessage, transportMessage: M) {
         if (isDiscoverable) {
-            logger.v(TAG, "onDiscoveryRequest received: $message")
+            logger.d(TAG, "onDiscoveryRequest received: $message")
 
             val identity = deserializer.deserialize(message.data)
             if (identity == identityProvider.get()) return //ignore self identity
@@ -200,7 +208,7 @@ abstract class NetworkDiscoveryServiceBase<T : Identity, M : TransportMessage>(
 
     private fun onDiscoveryResponse(message: IncomingNDSMessage) {
         if (isDiscovering) {
-            logger.v(TAG, "onDiscoveryResponse received: $message")
+            logger.d(TAG, "onDiscoveryResponse received: $message")
 
             val identity = deserializer.deserialize(message.data)
             logger.d(TAG, "server discovered, identity: $identity")
@@ -217,7 +225,7 @@ abstract class NetworkDiscoveryServiceBase<T : Identity, M : TransportMessage>(
 
     private fun onLeaveMessage(message: IncomingNDSMessage) {
         if (isDiscovering) {
-            logger.v(TAG, "onLeaveMessage received: $message")
+            logger.d(TAG, "onLeaveMessage received: $message")
 
             val identity = deserializer.deserialize(message.data)
             if (identity == identityProvider.get()) return //ignore self identity
@@ -229,7 +237,7 @@ abstract class NetworkDiscoveryServiceBase<T : Identity, M : TransportMessage>(
 
     private fun sendLeaveMessage() {
         try {
-            logger.v(TAG, "sendLeaveMessage")
+            logger.d(TAG, "sendLeaveMessage")
 
             val serializedIdentity = serializer.serialize(identityProvider.get())
             val message = com.sr01.p2p.discovery.NDSParser.createLeaveMessage(serializedIdentity)
@@ -242,7 +250,7 @@ abstract class NetworkDiscoveryServiceBase<T : Identity, M : TransportMessage>(
 
     private fun sendDiscoveryRequest() {
         try {
-            logger.v(TAG, "sendDiscoveryRequest")
+            logger.d(TAG, "sendDiscoveryRequest")
 
             val serializedIdentity = serializer.serialize(identityProvider.get())
             val message = com.sr01.p2p.discovery.NDSParser.createDiscoveryRequest(serializedIdentity)
@@ -257,7 +265,7 @@ abstract class NetworkDiscoveryServiceBase<T : Identity, M : TransportMessage>(
     private fun sendDiscoveryResponse(transportMessage: M) {
         workExecutor.submit {
             try {
-                logger.v(TAG, "sendDiscoveryResponse")
+                logger.d(TAG, "sendDiscoveryResponse")
 
                 val serializedIdentity = serializer.serialize(identityProvider.get())
                 val message = com.sr01.p2p.discovery.NDSParser.createDiscoveryResponse(serializedIdentity)
@@ -282,6 +290,8 @@ abstract class NetworkDiscoveryServiceBase<T : Identity, M : TransportMessage>(
     companion object {
         private const val DISCOVER_INTERVAL_MILLISEC = 5000L
         private const val TAG = "NDS.Base"
+        private const val MAX_START_READ_THREAD_RETRIES = 10
+        private const val START_READ_THREAD_RETRY_INTERVAL_SECONDS = 2L
     }
 }
 
@@ -295,9 +305,12 @@ data class IncomingNDSMessage(val type: NDSMessageTypes, val data: String) {
         private const val DISCOVERY_LEAVE_MESSAGE_HEADER = "im_leaving:"
 
         fun parse(message: String): IncomingNDSMessage = when {
-            message.startsWith(DISCOVERY_IS_THERE_ANYBODY_MESSAGE_HEADER) -> IncomingNDSMessage(NDSMessageTypes.DiscoveryRequest, message.substring(DISCOVERY_IS_THERE_ANYBODY_MESSAGE_HEADER.length, message.length))
-            message.startsWith(DISCOVERY_I_AM_HERE_MESSAGE_HEADER) -> IncomingNDSMessage(NDSMessageTypes.DiscoveryResponse, message.substring(DISCOVERY_I_AM_HERE_MESSAGE_HEADER.length))
-            message.startsWith(DISCOVERY_LEAVE_MESSAGE_HEADER) -> IncomingNDSMessage(NDSMessageTypes.LeaveMessage, message.substring(DISCOVERY_LEAVE_MESSAGE_HEADER.length, message.length))
+            message.startsWith(DISCOVERY_IS_THERE_ANYBODY_MESSAGE_HEADER) -> IncomingNDSMessage(NDSMessageTypes.DiscoveryRequest,
+                message.substring(DISCOVERY_IS_THERE_ANYBODY_MESSAGE_HEADER.length, message.length))
+            message.startsWith(DISCOVERY_I_AM_HERE_MESSAGE_HEADER) -> IncomingNDSMessage(NDSMessageTypes.DiscoveryResponse,
+                message.substring(DISCOVERY_I_AM_HERE_MESSAGE_HEADER.length))
+            message.startsWith(DISCOVERY_LEAVE_MESSAGE_HEADER) -> IncomingNDSMessage(NDSMessageTypes.LeaveMessage,
+                message.substring(DISCOVERY_LEAVE_MESSAGE_HEADER.length, message.length))
             else -> IncomingNDSMessage(NDSMessageTypes.Unknown, message)
         }
     }

@@ -1,5 +1,6 @@
 package com.sr01.p2p.utils
 
 interface IPAddressProvider {
-    val ipAddress: String
+    fun getConnectedWiFiIPAddress(): String
+    fun getAllIPAddresses(): List<String>
 }

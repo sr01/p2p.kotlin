@@ -17,7 +17,6 @@ open class TcpPeer<TMessage>(val localPort: Int, private val protocol: MessagePr
     private val executor = Executors.newSingleThreadExecutor()
     private val connectionFactory: TcpPeerConnectionFactory<TMessage> = TcpPeerConnectionFactory(protocol, logger)
     private var onIncomingConnection: (connection: PeerConnection<TMessage>) -> Unit = {}
-    private var isStarted = false
 
     init {
         connectionMap = ConcurrentHashMap()
@@ -32,19 +31,21 @@ open class TcpPeer<TMessage>(val localPort: Int, private val protocol: MessagePr
     }
 
     override fun start() {
+        logger.d(tag, "start 1")
         executor.execute {
-            if (!isStarted) {
-                server.start()
-            }
+            logger.d(tag, "start 2")
+            logger.d(tag, "start 3")
+            server.start()
         }
     }
 
     override fun stop() {
+        logger.d(tag, "stop, 1")
         executor.execute {
-            if (isStarted) {
-                server.stop()
-                internalDisconnectAll()
-            }
+            logger.d(tag, "stop, 2")
+            logger.d(tag, "stop, 3")
+            server.stop()
+            internalDisconnectAll()
         }
     }
 
@@ -58,10 +59,12 @@ open class TcpPeer<TMessage>(val localPort: Int, private val protocol: MessagePr
                     onConnectionCreated(peerConnection)
                 }
                 else -> {
-                    val peerConnection = connectionFactory.create(ConnectionInfo(connectionId, host, port))
-                    addConnection(connectionId, peerConnection)
-                    peerConnection.connect()
-                    onConnectionCreated(peerConnection)
+                    val newPeerConnection = connectionFactory.create(ConnectionInfo(connectionId, host, port))
+                    addConnection(connectionId, newPeerConnection)
+                    onConnectionCreated(newPeerConnection)
+                    executor.execute {
+                        newPeerConnection.connect()
+                    }
                 }
             }
         }
@@ -92,19 +95,21 @@ open class TcpPeer<TMessage>(val localPort: Int, private val protocol: MessagePr
     }
 
     private fun internalDisconnectAll() {
-        val connections = ArrayList(connectionMap.values)
-        for (con in connections) {
-            con.disconnect()
+        logger.d(tag, "internalDisconnectAll")
+        val connectionsIds = ArrayList(connectionMap.keys)
+        connectionsIds.forEach { connectionsId ->
+            logger.d(tag, "internalDisconnectAll, connectionsId: $connectionsId")
+            disconnect(connectionsId)
         }
     }
 
     private fun addConnection(connectionId: String, connection: PeerConnection<TMessage>) {
         connectionMap.put(connectionId, connection)
         connection.onConnected {
-            this@TcpPeer.logger.i(tag, "peer/$localPort, connection connected: $connectionId")
+            this@TcpPeer.logger.i(tag, "peer/$localPort, onConnected, connectionId: $connectionId, connection: $connection")
         }
         connection.onDisconnected {
-            this@TcpPeer.logger.i(tag, "peer/$localPort, connection disconnected: $connectionId")
+            this@TcpPeer.logger.i(tag, "peer/$localPort, onDisconnected, connectionId: $connectionId, connection: $connection")
             connectionMap.remove(connectionId)
         }
         connection.onFailedToConnect {
@@ -112,5 +117,5 @@ open class TcpPeer<TMessage>(val localPort: Int, private val protocol: MessagePr
         }
     }
 
-    private fun createConnectionId(host: String, port: Int): String = String.format("%s:%d", host, port)
+    private fun createConnectionId(host: String, port: Int): String = String.format("%s", host)
 }
