@@ -10,4 +10,6 @@ interface Peer<TMessage> {
     fun disconnect(connectionId: String)
 
     fun disconnectAll()
+
+    fun onIncomingConnection(onIncomingConnection: (connection: PeerConnection<TMessage>) -> Unit)
 }

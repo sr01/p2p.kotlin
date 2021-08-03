@@ -6,7 +6,6 @@ import com.sr01.p2p.identity.IdentityDeserializer
 import com.sr01.p2p.identity.IdentityProvider
 import com.sr01.p2p.identity.IdentitySerializer
 import com.sr01.p2p.utils.Logger
-import com.sr01.p2p.utils.get
 import java.util.*
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
