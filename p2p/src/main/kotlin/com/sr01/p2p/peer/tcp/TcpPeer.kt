@@ -1,10 +1,9 @@
 package com.sr01.p2p.peer.tcp
 
-
-import com.sr01.p2p.Config
-import com.sr01.p2p.peer.*
+import com.sr01.p2p.peer.MessageProtocol
+import com.sr01.p2p.peer.Peer
+import com.sr01.p2p.peer.PeerConnection
 import com.sr01.p2p.utils.Logger
-import java.util.*
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 
@@ -88,7 +87,7 @@ open class TcpPeer<TMessage>(val localPort: Int, private val protocol: MessagePr
         }
     }
 
-    fun onIncomingConnection(onIncomingConnection: (connection: PeerConnection<TMessage>) -> Unit) {
+    override fun onIncomingConnection(onIncomingConnection: (connection: PeerConnection<TMessage>) -> Unit) {
         executor.execute {
             this.onIncomingConnection = onIncomingConnection
         }

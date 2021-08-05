@@ -69,7 +69,9 @@ class P2PTest {
         val expectedMessage = TextMessage(7, "Hello from 1")
 
         peer2.connect("localhost", peer1.localPort) { connection ->
-            connection.send(expectedMessage)
+            connection.onConnected {
+                it.send(expectedMessage)
+            }
         }
 
         peer1.onIncomingConnection { connection ->

@@ -10,7 +10,7 @@ publishing {
 
             groupId = 'com.github.sr01'
             artifactId = 'p2p.kotlin'
-            version = '1.0.3.2'
+            version = '1.0.3.3'
 
             from components.java
 
